@@ -29,10 +29,11 @@
 
 | 구분 | 내용 |
 |---|---|
-| CLI 인터페이스 | `argparse` 기반, `--date "YYYY-MM-DD"` 필수 옵션, 날짜 형식 검증 |
-| 1차 LLM 추천 | OpenAI가 날짜 기반으로 도시 1곳을 JSON(`recommended_city`, `weather`, `events`, `reason`)으로 추천 |
-| 장소 검색 | Kakao Local API로 추천 도시의 맛집 최대 5곳 검색(`name`, `address`, `category`, `url`, `x`, `y`) |
-| 2차 LLM 리포트 생성 | 1차 추천 + 맛집 목록을 종합해 Markdown 리포트 작성(추천지역/이유, 날씨, 행사, 맛집, 1일 일정) |
+| CLI 인터페이스 | `argparse` 기반, `--date "YYYY-MM-DD"` 필수 옵션, 날짜 형식 검증, `--count`(추천 지역 수), `--refresh`(캐시 무시) 옵션 |
+| 1차 LLM 추천 | OpenAI가 날짜 기반으로 도시를 `--count`개(기본 1곳, 최대 5곳) JSON 배열(`recommended_city`, `weather`, `events`, `reason`)로 추천 |
+| 장소 검색 | Kakao Local API로 추천된 지역마다 맛집 최대 5곳 검색(`name`, `address`, `category`, `url`, `x`, `y`) |
+| 2차 LLM 리포트 생성 | 지역별로 추천 이유·날씨·행사·맛집·1일 일정을 종합해 Markdown 리포트 작성, 지역이 여러 곳이면 지역별 섹션으로 구분 |
+| 결과 캐싱 | 동일한 `--date`로 재실행하면 API를 다시 호출하지 않고 `results/{date}_data.json`을 재사용, `--refresh`로 강제 재조회 가능 |
 | 에러 처리 | 키 미설정 즉시 종료, LLM JSON 파싱 실패 1회 재시도, 장소 검색 0건 최대 2회 재시도, 지도 API 인증 실패 시 "데이터 없음" 처리 후 계속 진행 |
 | 결과 저장 | `results/` 폴더에 원본 데이터 JSON과 최종 리포트 Markdown을 날짜별로 저장 |
 
@@ -120,7 +121,14 @@ $env:KAKAO_API_KEY.Length            # 길이만 확인
 ## 5. 실행 방법
 
 ```bash
+# 기본: 지역 1곳 추천
 python travel_planner.py --date "2025-03-15"
+
+# 여러 지역을 한 번에 추천 (예: 2곳)
+python travel_planner.py --date "2025-03-15" --count 2
+
+# 캐시를 무시하고 강제로 새로 조회
+python travel_planner.py --date "2025-03-15" --count 2 --refresh
 ```
 
 ### 출력 예시
@@ -137,6 +145,8 @@ python travel_planner.py --date "2025-03-15"
   - 원본 데이터: C:\Users\user\Desktop\travel_project\results\2025-03-15_data.json
   - 여행 리포트: C:\Users\user\Desktop\travel_project\results\2025-03-15_travel_plan.md
 ```
+
+복수 지역 추천과 결과 캐싱의 실제 실행 화면은 "14. 보너스 과제 구현 결과"에서 확인할 수 있다.
 
 ---
 
@@ -257,16 +267,22 @@ travel_project/
 
 ## 13. 전체 소스 코드 (travel_planner.py)
 
+기본 요구사항 완료 후 아래 15장의 두 보너스 과제(복수 지역 추천, 결과 캐싱)를 실제로 반영한 최종 버전이다. `--count`(추천받을 지역 수)와 `--refresh`(캐시 무시) 옵션이 추가되었다.
+
 ```python
 """
-Python 응용: API 활용 국내 여행지 추천 프로그램
-- LLM(OpenAI)으로 날짜 기반 1차 여행지 추천(JSON)
-- Kakao Local API로 추천 도시의 맛집 검색
-- LLM(OpenAI)으로 최종 여행 리포트(Markdown) 생성
+Python 응용: API 활용 국내 여행지 추천 프로그램 (보너스 과제 반영판)
+- LLM(OpenAI)으로 날짜 기반 1차 여행지 추천(JSON) — 복수 지역 지원
+- Kakao Local API로 추천 도시별 맛집 검색
+- LLM(OpenAI)으로 최종 여행 리포트(Markdown) 생성 — 지역별 섹션 포함
 - 결과를 results/ 폴더에 JSON + Markdown으로 저장
+- [보너스 1] --count 옵션으로 여러 지역을 한 번에 추천
+- [보너스 2] 동일한 날짜로 재실행 시 API 재호출 없이 저장된 결과를 재사용(캐싱)
 
 실행 예시:
-    python travel_planner.py --date "2025-03-15"
+    python travel_planner_with_bonus.py --date "2025-03-15"
+    python travel_planner_with_bonus.py --date "2025-03-15" --count 3
+    python travel_planner_with_bonus.py --date "2025-03-15" --refresh
 """
 
 import os
@@ -295,6 +311,8 @@ OPENAI_MODEL = "gpt-4o-mini"
 KAKAO_SEARCH_COUNT = 5          # 맛집 검색 권장 개수
 LLM_JSON_RETRY_LIMIT = 1        # LLM JSON 파싱 실패 시 재시도 횟수 (요구사항: 최대 1회)
 PLACE_EMPTY_RETRY_LIMIT = 2     # 맛집 검색 0건 시 파라미터를 바꿔 재시도할 횟수 (최대 2회)
+DEFAULT_REGION_COUNT = 1        # [보너스 1] --count 미지정 시 기본 추천 지역 수
+MAX_REGION_COUNT = 5            # [보너스 1] --count 상한 (과도한 API 호출 방지)
 
 
 # =========================================================
@@ -305,10 +323,8 @@ def strip_code_fence(text: str) -> str:
     text = text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
-        # 첫 줄이 ``` 또는 ```json, ```markdown 등이면 제거
         if lines[0].startswith("```"):
             lines = lines[1:]
-        # 마지막 줄이 ``` 이면 제거
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
         text = "\n".join(lines).strip()
@@ -339,13 +355,23 @@ def load_api_keys():
 
 # =========================================================
 # 2. CLI 인자 처리 + 날짜 검증
+#    [보너스 1] --count 추가
+#    [보너스 2] --refresh 추가
 # =========================================================
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="국내 여행지 추천 프로그램",
-        usage='python travel_planner.py --date "YYYY-MM-DD"'
+        description="국내 여행지 추천 프로그램 (복수 지역 + 결과 캐싱 지원)",
+        usage='python travel_planner_with_bonus.py --date "YYYY-MM-DD" [--count N] [--refresh]'
     )
     parser.add_argument("--date", required=True, help="여행 날짜 (형식: YYYY-MM-DD)")
+    parser.add_argument(
+        "--count", type=int, default=DEFAULT_REGION_COUNT,
+        help=f"추천받을 지역 수 (기본 {DEFAULT_REGION_COUNT}, 최대 {MAX_REGION_COUNT})"
+    )
+    parser.add_argument(
+        "--refresh", action="store_true",
+        help="이미 저장된 결과가 있어도 캐시를 무시하고 API를 다시 호출"
+    )
     args = parser.parse_args()
 
     try:
@@ -355,27 +381,58 @@ def parse_args():
         print('날짜 형식이 올바르지 않습니다. 예: --date "2025-03-15"')
         sys.exit(1)
 
-    return args.date
+    if args.count < 1:
+        print("--count는 1 이상이어야 합니다. 1로 조정합니다.")
+        args.count = 1
+    if args.count > MAX_REGION_COUNT:
+        print(f"--count는 최대 {MAX_REGION_COUNT}까지 지원합니다. {MAX_REGION_COUNT}로 조정합니다.")
+        args.count = MAX_REGION_COUNT
+
+    return args
 
 
 # =========================================================
-# 3. LLM 1차 추천 (JSON) — 파싱 실패 시 최대 1회 재시도
+# [보너스 2] 결과 캐싱 — 동일 날짜 재실행 시 저장된 데이터 재사용
 # =========================================================
-def get_recommendation(client: OpenAI, date: str, errors: list):
+def load_cache_if_exists(date: str):
+    """results/{date}_data.json이 있으면 읽어서 반환, 없으면 None"""
+    path = os.path.join(os.getcwd(), "results", f"{date}_data.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        # 캐시 파일이 손상된 경우 캐시를 무시하고 새로 조회
+        return None
+
+
+# =========================================================
+# 3. LLM 1차 추천 (JSON) — [보너스 1] 여러 지역을 한 번에 추천
+#    파싱 실패 시 최대 1회 재시도
+# =========================================================
+def get_recommendations(client: OpenAI, date: str, count: int, errors: list):
     base_prompt = f"""
-{date}에 여행하기 좋은 국내 도시를 1곳 추천해줘.
+{date}에 여행하기 좋은 국내 도시를 서로 겹치지 않게 {count}곳 추천해줘.
+각 도시는 우선순위(추천도) 순서로 나열해줘.
 반드시 아래 JSON 형식으로만 답하고, 다른 설명은 절대 붙이지 마.
 
 {{
-  "recommended_city": "도시명",
-  "weather": "해당 시기 일반적 날씨 요약",
-  "events": ["행사/축제 후보1", "행사/축제 후보2"],
-  "reason": "추천 근거 2~4문장"
+  "recommendations": [
+    {{
+      "recommended_city": "도시명",
+      "weather": "해당 시기 일반적 날씨 요약",
+      "events": ["행사/축제 후보1", "행사/축제 후보2"],
+      "reason": "추천 근거 2~4문장"
+    }}
+  ]
 }}
+
+recommendations 배열의 길이는 반드시 {count}여야 해.
 """.strip()
 
     prompt = base_prompt
-    for attempt in range(1, LLM_JSON_RETRY_LIMIT + 2):  # 최초 1회 + 재시도 1회
+    for attempt in range(1, LLM_JSON_RETRY_LIMIT + 2):
         try:
             response = client.chat.completions.create(
                 model=OPENAI_MODEL,
@@ -387,13 +444,18 @@ def get_recommendation(client: OpenAI, date: str, errors: list):
                 content = content[4:].strip()
 
             data = json.loads(content)
+            recs = data.get("recommendations")
 
-            # 최소 스키마 확인
+            if not isinstance(recs, list) or not recs:
+                raise ValueError("recommendations 배열이 비어있거나 없음")
+
             required_keys = ["recommended_city", "weather", "events", "reason"]
-            if not all(k in data for k in required_keys):
-                raise ValueError("필수 키 누락")
+            for rec in recs:
+                if not all(k in rec for k in required_keys):
+                    raise ValueError("필수 키 누락")
 
-            return data
+            # 요청한 개수보다 적게 왔으면 있는 만큼만 사용 (많이 왔으면 앞에서부터 count개만 사용)
+            return recs[:count]
 
         except (json.JSONDecodeError, ValueError) as e:
             print(f"[LLM_PARSE_ERROR] {attempt}번째 시도 JSON 파싱 실패: {e}")
@@ -403,22 +465,21 @@ def get_recommendation(client: OpenAI, date: str, errors: list):
                 "message": f"attempt {attempt}: {str(e)}"
             })
             if attempt <= LLM_JSON_RETRY_LIMIT:
-                # 재시도 시 프롬프트를 더 엄격하게 보강
                 prompt = base_prompt + "\n\n반드시 JSON 객체만 출력해. 앞뒤에 어떤 텍스트도 붙이지 마."
                 time.sleep(1)
                 continue
-            # 재시도 소진 → 기본값으로 진행 (프로그램은 계속)
-            return {
+            # 재시도 소진 → 기본값 1건으로 진행 (프로그램은 계속)
+            return [{
                 "recommended_city": "정보없음",
                 "weather": "정보없음",
                 "events": [],
                 "reason": "LLM 응답 파싱에 실패하여 추천 정보를 가져오지 못했습니다."
-            }
+            }]
 
         except AuthenticationError:
             print("[AUTH_ERROR] OpenAI 인증에 실패했습니다 (401/403). API 키를 다시 확인하세요.")
             errors.append({"step": "recommendation", "type": "AUTH_ERROR", "message": "OpenAI 401/403"})
-            sys.exit(1)  # LLM 인증 실패는 프로그램의 핵심 기능이 불가하므로 즉시 종료
+            sys.exit(1)
 
         except APIError as e:
             print(f"[API_ERROR] OpenAI 호출 중 오류: {e}")
@@ -426,24 +487,21 @@ def get_recommendation(client: OpenAI, date: str, errors: list):
             if attempt <= LLM_JSON_RETRY_LIMIT:
                 time.sleep(1)
                 continue
-            return {
+            return [{
                 "recommended_city": "정보없음",
                 "weather": "정보없음",
                 "events": [],
                 "reason": "API 오류로 추천 정보를 가져오지 못했습니다."
-            }
+            }]
 
 
 # =========================================================
-# 4. Kakao Local API 맛집 검색
-#    - 인증 실패(401/403): 맛집=데이터없음 처리 후 계속 진행
-#    - 결과 0건: 파라미터를 바꿔 최대 2회 재시도 후 "데이터 없음" 표기
+# 4. Kakao Local API 맛집 검색 (지역별로 동일하게 반복 호출)
 # =========================================================
 def search_restaurants(kakao_key: str, city: str, errors: list):
     url = "https://dapi.kakao.com/v2/local/search/keyword.json"
     headers = {"Authorization": f"KakaoAK {kakao_key}"}
-
-    queries = [f"{city} 맛집", f"{city} 음식점", city]  # 재시도 시 쓸 파라미터 변형
+    queries = [f"{city} 맛집", f"{city} 음식점", city]
 
     for attempt, query in enumerate(queries[:PLACE_EMPTY_RETRY_LIMIT + 1], start=1):
         try:
@@ -455,31 +513,27 @@ def search_restaurants(kakao_key: str, city: str, errors: list):
 
             if res.status_code in (401, 403):
                 print(f"[AUTH_ERROR] Kakao 인증 실패({res.status_code}). 키 설정을 확인하세요.")
-                print("→ 맛집 섹션은 '데이터 없음'으로 처리하고 리포트 생성은 계속 진행합니다.")
+                print(f"→ '{city}' 맛집 섹션은 '데이터 없음'으로 처리하고 계속 진행합니다.")
                 errors.append({
                     "step": "place_search",
                     "type": "AUTH_ERROR",
-                    "message": f"HTTP {res.status_code}"
+                    "message": f"HTTP {res.status_code} (city={city})"
                 })
-                return []  # 즉시 빈 리스트 반환, 재시도하지 않음 (인증 문제는 파라미터로 해결 안 됨)
+                return []
 
             res.raise_for_status()
             documents = res.json().get("documents", [])
 
             if documents:
-                restaurants = []
-                for d in documents:
-                    restaurants.append({
-                        "name": d.get("place_name", ""),
-                        "address": d.get("address_name", ""),
-                        "category": d.get("category_name", ""),
-                        "url": d.get("place_url", ""),
-                        "x": d.get("x", ""),
-                        "y": d.get("y", ""),
-                    })
-                return restaurants
+                return [{
+                    "name": d.get("place_name", ""),
+                    "address": d.get("address_name", ""),
+                    "category": d.get("category_name", ""),
+                    "url": d.get("place_url", ""),
+                    "x": d.get("x", ""),
+                    "y": d.get("y", ""),
+                } for d in documents]
 
-            # 결과 0건 → EMPTY_RESULT, 다음 파라미터로 재시도
             print(f"[EMPTY_RESULT] '{query}' 검색 결과 0건 ({attempt}/{PLACE_EMPTY_RETRY_LIMIT + 1}차 시도)")
             errors.append({
                 "step": "place_search",
@@ -492,47 +546,44 @@ def search_restaurants(kakao_key: str, city: str, errors: list):
         except requests.exceptions.RequestException as e:
             print(f"[NETWORK_ERROR] Kakao API 호출 실패: {e}")
             errors.append({"step": "place_search", "type": "NETWORK_ERROR", "message": str(e)})
-            return []  # 네트워크 오류도 맛집=데이터없음으로 계속 진행
+            return []
 
-    # 모든 재시도 후에도 0건
-    print("[EMPTY_RESULT] 재시도 후에도 맛집 검색 결과가 없습니다. '데이터 없음'으로 표기합니다.")
+    print(f"[EMPTY_RESULT] '{city}' 재시도 후에도 맛집 검색 결과가 없습니다. '데이터 없음'으로 표기합니다.")
     return []
 
 
 # =========================================================
-# 5. LLM 최종 리포트 생성 (Markdown)
+# 5. LLM 최종 리포트 생성 (Markdown) — [보너스 1] 지역별 섹션 구성
 # =========================================================
-def generate_report(client: OpenAI, date: str, recommendation: dict, restaurants: list, errors: list) -> str:
+def generate_region_section(client: OpenAI, region_no: int, recommendation: dict,
+                             restaurants: list, errors: list) -> str:
+    """지역 1곳에 대한 리포트 섹션(##으로 시작)을 생성"""
     city = recommendation.get("recommended_city", "정보없음")
     weather = recommendation.get("weather", "정보없음")
     events = recommendation.get("events", [])
     reason = recommendation.get("reason", "")
 
     if restaurants:
-        restaurant_text = "\n".join(
-            f"- {r['name']} ({r['address']})" for r in restaurants
-        )
+        restaurant_text = "\n".join(f"- {r['name']} ({r['address']})" for r in restaurants)
     else:
         restaurant_text = "데이터 없음 (장소 검색 결과 0건 또는 API 오류)"
 
     prompt = f"""
-아래 정보를 바탕으로 국내 여행 추천 리포트를 Markdown으로 작성해줘.
+아래 정보를 바탕으로 국내 여행 추천 리포트의 한 지역 섹션을 Markdown으로 작성해줘.
 
 [출력 형식 규칙 - 반드시 지켜]
 1. 코드블록(```)으로 감싸지 마. 순수 Markdown 텍스트만 출력해.
-2. # 으로 시작하는 제목(H1)은 절대 넣지 마. 문서 제목은 이미 별도로 붙일 것이므로 필요 없음.
-3. 출력의 맨 첫 줄은 반드시 "## 추천 지역" 이어야 해. 그 앞에 어떤 문장, 제목, 인사말도 넣지 마.
+2. # 으로 시작하는 제목(H1)은 절대 넣지 마.
+3. 출력의 맨 첫 줄은 반드시 "### 추천 이유" 여야 해. 지역명 제목은 이미 별도로 붙일 것이므로 넣지 마.
 
 반드시 아래 섹션을 모두 포함해:
-## 추천 지역
-## 추천 이유
-## 날씨 요약
-## 행사/축제
-## 맛집 추천
-## 1일 일정 제안 (오전/오후/저녁)
+### 추천 이유
+### 날씨 요약
+### 행사/축제
+### 맛집 추천
+### 1일 일정 제안 (오전/오후/저녁)
 
 [입력 정보]
-- 날짜: {date}
 - 추천 지역: {city}
 - 날씨: {weather}
 - 행사/축제 후보: {', '.join(events) if events else '없음'}
@@ -540,7 +591,7 @@ def generate_report(client: OpenAI, date: str, recommendation: dict, restaurants
 - 맛집 목록:
 {restaurant_text}
 
-맛집 목록이 "데이터 없음"이면 리포트의 맛집 추천 섹션에도 "데이터 없음"이라고 그대로 표기해.
+맛집 목록이 "데이터 없음"이면 맛집 추천 섹션에도 "데이터 없음"이라고 그대로 표기해.
 """.strip()
 
     try:
@@ -549,65 +600,69 @@ def generate_report(client: OpenAI, date: str, recommendation: dict, restaurants
             messages=[{"role": "user", "content": prompt}],
             temperature=0.6,
         )
-        report_body = strip_code_fence(response.choices[0].message.content)
+        body = strip_code_fence(response.choices[0].message.content)
 
-        # LLM이 지시를 무시하고 최상단에 # 제목(H1)을 넣은 경우, 중복 방지를 위해 제거
-        # (빈 줄이 앞에 껴 있어도 실제 첫 텍스트 줄을 찾아서 확인)
-        body_lines = report_body.split("\n")
-        first_idx = 0
-        while first_idx < len(body_lines) and body_lines[first_idx].strip() == "":
-            first_idx += 1
-        if first_idx < len(body_lines) and body_lines[first_idx].strip().startswith("# ") \
-                and not body_lines[first_idx].strip().startswith("## "):
-            body_lines = body_lines[first_idx + 1:]
-        report_body = "\n".join(body_lines).strip()
+        lines = body.split("\n")
+        i = 0
+        while i < len(lines) and lines[i].strip() == "":
+            i += 1
+        if i < len(lines) and lines[i].strip().startswith("#") and not lines[i].strip().startswith("###"):
+            lines = lines[i + 1:]
+        body = "\n".join(lines).strip()
 
     except (AuthenticationError, APIError) as e:
-        print(f"[REPORT_ERROR] 리포트 생성 중 오류: {e}. 기본 템플릿으로 대체합니다.")
-        errors.append({"step": "report_generation", "type": "API_ERROR", "message": str(e)})
-        report_body = f"""## 추천 지역
-{city}
-
-## 추천 이유
+        print(f"[REPORT_ERROR] '{city}' 리포트 생성 중 오류: {e}. 기본 템플릿으로 대체합니다.")
+        errors.append({"step": "report_generation", "type": "API_ERROR", "message": f"{city}: {str(e)}"})
+        body = f"""### 추천 이유
 {reason}
 
-## 날씨 요약
+### 날씨 요약
 {weather}
 
-## 행사/축제
+### 행사/축제
 {', '.join(events) if events else '데이터 없음'}
 
-## 맛집 추천
+### 맛집 추천
 {restaurant_text}
 
-## 1일 일정 제안
+### 1일 일정 제안
 리포트 자동 생성에 실패하여 기본 템플릿으로 표시되었습니다."""
 
-    # 오류 요약 섹션은 항상 Python에서 직접 붙여서, LLM이 누락해도 보장되게 함
-    if errors:
-        errors_text = "\n".join(
-            f"- [{e['step']}] {e['type']}: {e['message']}" for e in errors
+    return f"## 추천 지역 {region_no} — {city}\n\n{body}"
+
+
+def generate_report(client: OpenAI, date: str, regions: list, errors: list) -> str:
+    """regions: [{"recommendation": {...}, "restaurants": [...]}, ...]"""
+    sections = []
+    for idx, region in enumerate(regions, start=1):
+        section = generate_region_section(
+            client, idx, region["recommendation"], region["restaurants"], errors
         )
+        sections.append(section)
+
+    body = "\n\n".join(sections)
+
+    if errors:
+        errors_text = "\n".join(f"- [{e['step']}] {e['type']}: {e['message']}" for e in errors)
     else:
         errors_text = "없음"
 
-    header = f"# {date} 국내 여행 추천 리포트\n\n"
+    header = f"# {date} 국내 여행 추천 리포트 ({len(regions)}개 지역)\n\n"
     footer = f"\n\n## 오류 요약(errors)\n{errors_text}\n"
 
-    return header + report_body + footer
+    return header + body + footer
 
 
 # =========================================================
-# 6. 결과 저장
+# 6. 결과 저장 — [보너스 1] regions 배열로 저장 (복수 지역 지원)
 # =========================================================
-def save_results(date: str, recommendation: dict, restaurants: list, report: str, errors: list):
+def save_results(date: str, regions: list, report: str, errors: list):
     results_dir = os.path.join(os.getcwd(), "results")
     os.makedirs(results_dir, exist_ok=True)
 
     raw_data = {
         "date": date,
-        "recommendation": recommendation,
-        "restaurants": restaurants,
+        "regions": regions,   # [{"recommendation": {...}, "restaurants": [...]}, ...]
         "errors": errors,
     }
 
@@ -623,29 +678,45 @@ def save_results(date: str, recommendation: dict, restaurants: list, report: str
 
 
 # =========================================================
-# 7. 메인 실행 흐름
+# 7. 메인 실행 흐름 — [보너스 2] 캐시 확인 로직 포함
 # =========================================================
 def main():
-    date = parse_args()
+    args = parse_args()
+    date = args.date
     openai_key, kakao_key = load_api_keys()
     client = OpenAI(api_key=openai_key)
 
     errors = []
 
-    print(f'[1/3] 1차 추천 생성 중(LLM)... (날짜: {date})')
-    recommendation = get_recommendation(client, date, errors)
-    city = recommendation.get("recommended_city", "정보없음")
-    print(f'  - recommended_city: "{city}"')
+    # ---- [보너스 2] 캐시 확인 ----
+    cached = None if args.refresh else load_cache_if_exists(date)
 
-    print("[2/3] 맛집 검색 중(Kakao Local API)...")
-    restaurants = search_restaurants(kakao_key, city, errors)
-    print(f"  - 맛집 {len(restaurants)}곳 검색 완료" if restaurants else "  - 맛집 검색 결과 없음 (데이터 없음으로 진행)")
+    if cached:
+        print(f"[CACHE] 기존 결과를 재사용합니다 → results/{date}_data.json (API를 호출하지 않습니다)")
+        regions = cached.get("regions", [])
+        errors = cached.get("errors", [])
+        cities = ", ".join(r["recommendation"].get("recommended_city", "?") for r in regions)
+        print(f'  - 캐시된 추천 지역({len(regions)}곳): {cities}')
+    else:
+        print(f'[1/3] 1차 추천 생성 중(LLM)... (날짜: {date}, 지역 수: {args.count})')
+        recommendations = get_recommendations(client, date, args.count, errors)
+        cities = ", ".join(r.get("recommended_city", "?") for r in recommendations)
+        print(f'  - 추천 지역({len(recommendations)}곳): {cities}')
+
+        print("[2/3] 지역별 맛집 검색 중(Kakao Local API)...")
+        regions = []
+        for rec in recommendations:
+            city = rec.get("recommended_city", "정보없음")
+            restaurants = search_restaurants(kakao_key, city, errors)
+            print(f"  - {city}: 맛집 {len(restaurants)}곳 검색 완료" if restaurants
+                  else f"  - {city}: 맛집 검색 결과 없음 (데이터 없음으로 진행)")
+            regions.append({"recommendation": rec, "restaurants": restaurants})
 
     print("[3/3] 최종 리포트 생성 중(LLM)...")
-    report = generate_report(client, date, recommendation, restaurants, errors)
+    report = generate_report(client, date, regions, errors)
     print("  - 리포트 생성 완료")
 
-    json_path, md_path = save_results(date, recommendation, restaurants, report, errors)
+    json_path, md_path = save_results(date, regions, report, errors)
 
     print(f"\n완료! 아래 결과 파일을 확인하세요.")
     print(f"  - 원본 데이터: {json_path}")
@@ -660,7 +731,60 @@ if __name__ == "__main__":
 
 ---
 
-## 14. 요구사항 자체 점검표
+## 14. 보너스 과제 구현 결과 — 복수 지역 추천 & 결과 캐싱
+
+기본 요구사항 완료 후 두 보너스 기능을 실제로 구현했다. CLI에 `--count`(추천받을 지역 수)와 `--refresh`(캐시 무시하고 강제 재조회) 옵션을 추가했다.
+
+### 실행 방법
+
+```bash
+# 여러 지역을 한 번에 추천받기 (예: 2곳)
+python travel_planner.py --date "2025-10-01" --count 2
+
+# 같은 날짜로 다시 실행 → API 호출 없이 캐시된 결과 재사용
+python travel_planner.py --date "2025-10-01" --count 2
+
+# 캐시를 무시하고 강제로 새로 조회
+python travel_planner.py --date "2025-10-01" --count 2 --refresh
+```
+
+### 복수 지역 추천 — 실행 결과
+
+![](images/bonus2.png)
+
+*PowerShell — --count 2로 실행한 결과, 부산·경주 2개 지역이 한 번에 추천되고 [1/3]~[3/3] 전 과정이 정상 완료된 화면*
+
+![](images/bonus3.png)
+
+*VS Code — 2025-10-01_travel_plan.md 결과. "추천 지역 1 – 부산", "추천 지역 2 – 경주"로 지역별 섹션이 분리되어 생성됨*
+
+![](images/bonus4.png)
+
+*VS Code — 2025-10-01_data.json 결과. "regions" 배열 안에 지역별 recommendation·restaurants가 구조화되어 저장됨*
+
+![](images/bonus5.png)
+
+*results 폴더 — 기존 2025-03-15·2025-09-15 결과는 그대로 보존된 채 2025-10-01 결과(2개 지역 포함, 5KB)만 새로 추가된 모습*
+
+### 결과 캐싱 — 실행 결과
+
+![](images/bonus6.png)
+
+*PowerShell — --refresh 없이 동일한 --date로 재실행 시 [CACHE] 기존 결과를 재사용합니다 메시지와 함께 [1/3]·[2/3] 단계 없이 바로 [3/3]로 진행되는 화면*
+
+![](images/bonus7.png)
+
+*PowerShell — --refresh를 붙여 같은 날짜로 재실행하면 캐시를 무시하고 [1/3]부터 다시 API를 호출해, 이번에는 경주 대신 전주가 추천됨(실제로 API가 재호출되었음을 증명)*
+
+### 최종 프로젝트 폴더
+
+![](images/bonus1.png)
+
+*최종 travel_project 폴더 — travel_planner.py가 보너스 기능이 반영된 19KB 버전으로 교체된 모습*
+
+---
+
+## 15. 요구사항 자체 점검표
 
 | 항목 | 확인 |
 |---|---|
@@ -673,6 +797,8 @@ if __name__ == "__main__":
 | 지도 API 실패해도 리포트 생성은 계속 진행 | ✅ |
 | 캐시 파일(`__pycache__`, `*.pyc`) 관리 및 유의사항 문서화 | ✅ |
 | 실제 오류 상황(키 미설정/인증 실패/검색 0건/옵션 오류) 재현 검증 | ✅ |
+| (보너스) 복수 지역 추천 — --count 옵션 | ✅ |
+| (보너스) 결과 캐싱 — 재실행/--refresh | ✅ |
 
 ---
 
