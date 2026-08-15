@@ -77,6 +77,42 @@ results/{date}_data.json + results/{date}_travel_plan.md 저장
 
 ## 3. 설치 방법
 
+### 3-1. 개발 도구 설치
+
+작업을 시작하기 전에 아래 세 가지 프로그램이 필요합니다. 공용PC에는 설치되어 있지 않을 수 있으므로, 각 사이트에서 직접 내려받아 설치합니다.
+
+| 도구 | 다운로드 사이트 | 설치 방법 |
+|---|---|---|
+| PowerShell | Windows 10/11에 기본 내장 — 별도 설치 불필요 | 시작 메뉴에서 "PowerShell" 검색 후 실행 (관리자 권한 필요 없음) |
+| Python | python.org/downloads | "Download Python 3.x.x" 버튼 클릭 → 설치 시작 화면에서 **"Add python.exe to PATH"** 체크박스를 반드시 선택 → Install Now |
+| VS Code | code.visualstudio.com | "Download for Windows" 클릭 → 설치 파일 실행 → 기본 옵션으로 설치 진행 |
+
+설치가 끝나면 PowerShell을 새로 열어 아래 명령으로 정상 설치를 확인합니다.
+
+```powershell
+python --version
+pip --version
+code --version
+```
+
+버전 정보가 출력되면 정상입니다. `python --version`에서 "python은 인식되지 않는 명령입니다" 오류가 나면, Python 설치 시 "Add to PATH"를 체크하지 않은 경우이므로 Python을 삭제 후 PATH 체크박스를 선택해 재설치해야 합니다.
+
+### 3-2. 작업 폴더 만들기
+
+작업 전용 폴더를 **바탕화면에 딱 1개** 만들고 그 안에서만 작업합니다. 폴더를 여러 개 만들지 않고 하나로 고정해 두면 파일이 어디 있는지 헷갈리는 문제를 예방할 수 있습니다.
+
+```powershell
+cd C:\Users\user\Desktop
+mkdir travel_project
+cd travel_project
+```
+
+이후 모든 코드 파일과 결과물은 이 `travel_project` 폴더 안에서만 생성·실행합니다. VS Code에서도 "파일 → 폴더 열기"로 이 폴더 하나만 열어서 작업하면 됩니다.
+
+### 3-3. 패키지 설치 (pip install)
+
+pip는 파이썬 패키지 설치 도구로, Python을 설치하면 자동으로 함께 설치되므로 별도 설치가 필요 없습니다. 프로젝트 폴더 안에서 아래 명령으로 필요한 라이브러리를 설치합니다.
+
 ```bash
 # 프로젝트 폴더로 이동 후
 pip install requests python-dotenv openai
@@ -100,7 +136,27 @@ python-dotenv>=1.0.0
 
 ## 4. API 키 설정
 
-이 프로그램은 **OpenAI API 키**와 **Kakao REST API 키** 두 가지가 필요합니다. 키는 코드에 직접 작성하지 않고 아래 두 방식 중 하나로 관리합니다.
+이 프로그램은 **LLM API**와 **지도(장소 검색) API** 두 가지가 필요합니다. 각각 아래 서비스 중 하나를 선택해 키를 발급받으면 됩니다.
+
+### 어떤 API를 쓸까 — 키 발급처 선택
+
+**① LLM API (택 1)**
+
+| 서비스 | 발급처 | 비고 |
+|---|---|---|
+| OpenAI | platform.openai.com | 유료 (카드 등록 필요) |
+| Google Gemini | aistudio.google.com | **무료 — 추천!** 초보자에게 유리 |
+
+**② 지도 API (택 1)**
+
+| 서비스 | 발급처 | 비고 |
+|---|---|---|
+| Kakao Local | developers.kakao.com | **무료 — 추천!** 국내 장소 검색 강력 |
+| Naver Search | — | 국내 장소 검색 대안 |
+
+본 프로젝트는 위 조합 중 **OpenAI + Kakao Local**로 구현했습니다. 다른 조합(예: Gemini + Naver Search)을 쓰려면 `travel_planner.py`의 API 호출 부분(`get_recommendations()`, `search_restaurants()`)을 해당 서비스의 요청/응답 형식에 맞게 수정해야 합니다.
+
+키는 코드에 직접 작성하지 않고 아래 두 방식 중 하나로 관리합니다.
 
 ### 방식 A — 세션 환경변수 (공용PC 권장)
 
