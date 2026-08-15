@@ -97,6 +97,18 @@ code --version
 
 버전 정보가 출력되면 정상입니다. `python --version`에서 "python은 인식되지 않는 명령입니다" 오류가 나면, Python 설치 시 "Add to PATH"를 체크하지 않은 경우이므로 Python을 삭제 후 PATH 체크박스를 선택해 재설치해야 합니다.
 
+#### VS Code 한국어 언어팩 설치
+
+VS Code는 설치 직후 기본적으로 영어로 실행됩니다. 메뉴를 한글로 보기 위해 아래 순서로 한국어 언어팩을 설치합니다.
+
+1. VS Code를 실행하고 왼쪽 사이드바에서 확장(Extensions) 아이콘 클릭 (또는 `Ctrl+Shift+X`)
+2. 검색창에 "Korean" 또는 "한국어" 입력
+3. "Korean Language Pack for Visual Studio Code" 확장을 찾아 Install 클릭
+4. 설치가 끝나면 화면 오른쪽 아래에 "언어를 변경하려면 다시 시작하세요"라는 안내 팝업이 뜨는데, 여기서 **Change Language and Restart** 버튼을 클릭
+5. VS Code가 자동으로 껐다 켜지면서 메뉴가 한글로 표시됨
+
+팝업을 놓쳤거나 나타나지 않은 경우, `Ctrl+Shift+P`로 명령 팔레트를 열고 "Configure Display Language"를 입력해 `ko`를 선택한 뒤 VS Code를 직접 껐다 켜면 동일하게 적용됩니다.
+
 ### 3-2. 작업 폴더 만들기
 
 작업 전용 폴더를 **바탕화면에 딱 1개** 만들고 그 안에서만 작업합니다. 폴더를 여러 개 만들지 않고 하나로 고정해 두면 파일이 어디 있는지 헷갈리는 문제를 예방할 수 있습니다.
