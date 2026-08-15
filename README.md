@@ -1,8 +1,8 @@
 # 국내 여행지 추천 프로그램
 
-날짜를 입력하면 AI(OpenAI)가 국내 여행지를 1차 추천하고, Kakao Local API로 해당 지역의 맛집을 검색한 뒤, 두 정보를 종합해 최종 여행 리포트(Markdown)를 생성하는 CLI 프로그램입니다.
+날짜를 입력하면 AI(OpenAI)가 국내 여행지를 추천하고, Kakao Local API로 해당 지역의 맛집을 검색한 뒤, 두 정보를 종합해 최종 여행 리포트(Markdown)를 생성하는 CLI 프로그램입니다.
 
-모든 기능과 에러 처리 로직은 실제 성공/실패 케이스를 직접 발생시켜 검증을 완료했습니다. (검증 내역은 "9. 테스트 검증 내역" 참고)
+모든 기능과 에러 처리 로직은 실제 성공/실패 케이스를 직접 발생시켜 검증을 완료했습니다. (검증 내역은 "8. 테스트 검증 내역" 참고). 기본 요구사항 완료 후 **복수 지역 추천**과 **결과 캐싱** 두 가지 보너스 기능도 실제로 구현해 검증했습니다. (구현 결과는 "13. 보너스 과제 구현 결과" 참고)
 
 ---
 
@@ -12,16 +12,26 @@
 
 단일 API 호출이 아니라, 서로 다른 API들을 엮어 하나의 인사이트를 만드는 흐름을 구현하는 것이 이 과제의 핵심입니다. 사용자가 여행 날짜를 입력하면:
 
-1. **LLM API**(OpenAI)가 해당 시기에 여행하기 좋은 지역을 추천하고
+1. **LLM API**(OpenAI)가 해당 시기에 여행하기 좋은 지역을 추천하고 (보너스: `--count`로 여러 지역 동시 추천 가능)
 2. **지도/장소 API**(Kakao Local)가 그 지역의 맛집을 검색하고
 3. 다시 **LLM API**가 위 두 결과를 종합해 사람이 읽을 수 있는 최종 여행 리포트를 작성합니다
+4. 동일한 날짜로 재실행하면 API를 다시 호출하지 않고 저장된 결과를 재사용합니다 (보너스: 결과 캐싱, `--refresh`로 강제 재조회 가능)
 
 ### 과제 목표 (학습자가 스스로 설명할 수 있어야 하는 것)
 
 - REST API의 요청/응답 구조와 HTTP 메서드(GET/POST)의 차이 → 이 프로그램은 OpenAI(POST, JSON body)와 Kakao Local(GET, query parameter) 두 가지 호출 방식을 모두 사용합니다.
-- LLM 출력 결과를 구조화(JSON)하여 다음 단계(지도/장소 검색)의 입력으로 활용하는 흐름 → `get_recommendation()`의 반환값 `recommended_city`가 그대로 `search_restaurants()`의 입력 파라미터로 전달됩니다.
+- LLM 출력 결과를 구조화(JSON)하여 다음 단계(지도/장소 검색)의 입력으로 활용하는 흐름 → `get_recommendations()`의 반환값(지역 배열)이 그대로 `search_restaurants()`의 입력 파라미터로 지역마다 전달됩니다.
 - 외부 API 호출에서 발생하는 대표 오류(인증/쿼터/네트워크/파싱)와 대응 원칙 → 아래 "7. 에러 처리 정책" 표에 정리했고, 실제 상황을 재현해 검증했습니다.
 - API 키를 코드에 직접 작성하지 않고 `.env`/환경변수로 관리하는 이유 → 협업/공유 시 실수로 키가 공개되는 것을 방지, 키 교체 시 코드 수정 불필요, 과금/쿼터 사고 예방.
+
+### 항목 선택/결정 내용
+
+| 항목 | 선택/결정 내용 |
+|---|---|
+| LLM API | OpenAI 계열 API (gpt-4o-mini) 사용 |
+| 지도/장소 API | Kakao Local API (키워드 기반 장소 검색) 사용 |
+| 개발 환경 | Windows 공용PC, PowerShell·VS Code, Python 3.10 이상 |
+| 보안 원칙 | 공용PC이므로 API 키를 파일에 영구 저장하지 않고, PowerShell 세션 임시 환경변수($env:)를 기본으로 사용 |
 
 ---
 
@@ -42,16 +52,22 @@
 ## 2. 프로그램 흐름도
 
 ```
-사용자 입력(--date)
+사용자 입력(--date, [--count], [--refresh])
       │
       ▼
-[1/3] LLM 1차 추천 (get_recommendation)
-      │  recommended_city, weather, events, reason
+캐시 확인 (--refresh 없고 results/{date}_data.json 있으면) ──있음──▶ 캐시된 regions 재사용
+      │ 없음                                                            │
+      ▼                                                                 │
+[1/3] LLM 1차 추천 (get_recommendations) — 지역 N곳                      │
+      │  recommendations: [{recommended_city, weather, events, reason}, ...]
+      ▼                                                                 │
+[2/3] Kakao 맛집 검색 (search_restaurants) — 지역마다 반복                │
+      │  맛집 최대 5곳씩 (0건이어도 계속 진행)                            │
+      ▼                                                                 │
+      regions: [{recommendation, restaurants}, ...] ◀────────────────────
+      │
       ▼
-[2/3] Kakao 맛집 검색 (search_restaurants)
-      │  맛집 최대 5곳 (0건이어도 계속 진행)
-      ▼
-[3/3] LLM 최종 리포트 생성 (generate_report)
+[3/3] LLM 최종 리포트 생성 (generate_report) — 지역별 섹션
       │  Markdown 문자열
       ▼
 results/{date}_data.json + results/{date}_travel_plan.md 저장
@@ -146,7 +162,7 @@ python travel_planner.py --date "2025-03-15" --count 2 --refresh
   - 여행 리포트: C:\Users\user\Desktop\travel_project\results\2025-03-15_travel_plan.md
 ```
 
-복수 지역 추천과 결과 캐싱의 실제 실행 화면은 "14. 보너스 과제 구현 결과"에서 확인할 수 있다.
+복수 지역 추천과 결과 캐싱의 실제 실행 화면은 "13. 보너스 과제 구현 결과"에서 확인할 수 있습니다.
 
 ---
 
@@ -156,15 +172,19 @@ python travel_planner.py --date "2025-03-15" --count 2 --refresh
 
 ```json
 {
-  "date": "2025-03-15",
-  "recommendation": {
-    "recommended_city": "제주도",
-    "weather": "...",
-    "events": ["...", "..."],
-    "reason": "..."
-  },
-  "restaurants": [
-    {"name": "...", "address": "...", "category": "...", "url": "...", "x": "...", "y": "..."}
+  "date": "2025-10-01",
+  "regions": [
+    {
+      "recommendation": {
+        "recommended_city": "부산",
+        "weather": "...",
+        "events": ["...", "..."],
+        "reason": "..."
+      },
+      "restaurants": [
+        {"name": "...", "address": "...", "category": "...", "url": "...", "x": "...", "y": "..."}
+      ]
+    }
   ],
   "errors": []
 }
@@ -172,7 +192,7 @@ python travel_planner.py --date "2025-03-15" --count 2 --refresh
 
 ### `results/{date}_travel_plan.md`
 
-`## 추천 지역`으로 시작하는 Markdown 문서로, 추천 지역/이유·날씨 요약·행사/축제·맛집 추천·1일 일정 제안·오류 요약(errors) 섹션을 포함합니다.
+지역이 1곳이면 `## 추천 지역` 단일 섹션, 여러 곳이면 `## 추천 지역 1 — 부산`, `## 추천 지역 2 — 경주`처럼 지역별 섹션으로 구성됩니다. 각 지역 섹션에는 추천 이유·날씨 요약·행사/축제·맛집 추천·1일 일정 제안이 포함되고, 문서 맨 끝에는 오류 요약(errors) 섹션이 항상 붙습니다.
 
 ---
 
@@ -181,12 +201,13 @@ python travel_planner.py --date "2025-03-15" --count 2 --refresh
 | 상황 | 담당 함수 | 동작 |
 |---|---|---|
 | API 키 미설정 | `load_api_keys()` | 즉시 종료 + 어떤 키가 없는지와 설정 방법 안내 |
-| OpenAI 인증 실패(401/403) | `get_recommendation()` | 핵심 기능이므로 즉시 종료 |
-| OpenAI JSON 파싱 실패 | `get_recommendation()` | 프롬프트를 보강해 최대 1회 재시도, 이후 "정보없음" 기본값으로 계속 진행 |
+| OpenAI 인증 실패(401/403) | `get_recommendations()` | 핵심 기능이므로 즉시 종료 |
+| OpenAI JSON 파싱 실패 | `get_recommendations()` | 프롬프트를 보강해 최대 1회 재시도, 이후 "정보없음" 기본값으로 계속 진행 |
 | Kakao 인증 실패(401/403) | `search_restaurants()` | 맛집을 "데이터 없음"으로 처리, 리포트 생성은 중단 없이 계속 |
 | Kakao 검색 결과 0건 | `search_restaurants()` | 검색어를 "맛집→음식점→도시명" 순으로 바꿔 최대 2회 재시도 |
 | 네트워크 오류 | `search_restaurants()` | 맛집을 "데이터 없음"으로 처리하고 계속 진행 |
 | 리포트 생성 중 오류 | `generate_report()` | Python으로 조립한 기본 템플릿으로 대체 |
+| 캐시 파일 손상 | `load_cache_if_exists()` | 캐시를 무시하고 API를 새로 호출 |
 
 추가로, LLM이 최종 리포트를 코드블록(` ``` `)으로 감싸거나 제목(H1)을 중복으로 넣는 경우가 실제로 발생해, `strip_code_fence()` 함수와 중복 제목 제거 로직으로 후처리하도록 보강했습니다.
 
@@ -204,6 +225,8 @@ Python은 `.py` 파일을 실행할 때 `__pycache__/` 폴더 안에 컴파일�
 
 이 프로젝트를 그대로 내려받아 실행하는 경우, 처음 실행 시 `__pycache__/` 폴더가 새로 생기는 것은 정상 동작입니다.
 
+**참고 — "8. 캐시 파일 관리"와 "13. 보너스 과제 구현 결과"의 캐싱은 다른 개념입니다.** 여기서 다루는 `__pycache__`/`.pyc`는 파이썬 인터프리터가 코드를 다시 컴파일하지 않도록 자동으로 돕는 **실행 최적화 캐시**이고, 13장의 결과 캐싱은 **API 호출 결과(데이터)를 재사용하는, 개발자가 직접 구현한 애플리케이션 레벨 캐시**입니다.
+
 ---
 
 ## 9. 테스트 검증 내역
@@ -218,6 +241,8 @@ Python은 `.py` 파일을 실행할 때 `__pycache__/` 폴더 안에 컴파일�
 | Kakao 인증 실패(401) | `$env:KAKAO_API_KEY="invalid_test_key_1234"` | 맛집 "데이터 없음" 처리 후 `[3/3]`까지 정상 완주 |
 | 맛집 검색 0건 | 존재하지 않는 지명으로 `search_restaurants()` 직접 호출 | 검색어 3종 순차 재시도 후 "데이터 없음" 표기 |
 | 정상 실행(2회 이상) | 서로 다른 날짜(2025-03-15, 2025-09-15)로 반복 실행 | 매번 다른 지역·맛집·리포트가 정상 생성 |
+| 복수 지역 추천 | `--count 2`로 실행 | 지역 2곳이 한 번에 추천되고 지역별 섹션으로 리포트 생성 |
+| 결과 캐싱 | 동일 `--date`로 재실행 / `--refresh` 추가 재실행 | 캐시 재사용 시 API 미호출, `--refresh` 시 실제 재호출(다른 지역 추천으로 증명) |
 
 ---
 
@@ -247,27 +272,34 @@ A. 네. 실행 시 자동으로 재생성되는 컴파일 캐시이므로 삭제
 **Q. 맛집 검색 결과가 "데이터 없음"으로 나옵니다.**
 A. Kakao API 인증 실패이거나, 검색어 3종(맛집/음식점/도시명)으로 재시도해도 결과가 0건인 경우입니다. 프로그램은 중단되지 않고 리포트 생성까지 계속 진행합니다.
 
+**Q. `--count`를 크게 줘도 되나요?**
+A. 최대 5까지 지원합니다(`MAX_REGION_COUNT`). 그 이상 입력하면 자동으로 5로 조정되고 안내 메시지가 출력됩니다. 지역 수가 많아질수록 API 호출 횟수도 늘어나니 참고하세요.
+
+**Q. 캐시가 있는데도 최신 결과를 보고 싶으면요?**
+A. `--refresh` 옵션을 붙이면 저장된 캐시를 무시하고 API를 처음부터 다시 호출합니다.
+
 ---
 
 ## 12. 프로젝트 구조
 
 ```
 travel_project/
-├── travel_planner.py      ← 메인 프로그램
-├── requirements.txt       ← 필요 패키지 목록 (openai, requests, python-dotenv)
-├── README.md               ← 이 문서
-├── .gitignore               ← .env, __pycache__/, *.pyc 등 Git 제외 목록
-├── .env.example              ← API 키 입력 템플릿 (실제 키 없음)
-└── results/                  ← 실행 결과 저장 폴더 (자동 생성)
+├── travel_planner.py       ← 메인 프로그램 (보너스 기능 포함, 19KB)
+├── requirements.txt        ← 필요 패키지 목록 (openai, requests, python-dotenv)
+├── README.md                ← 이 문서
+├── .gitignore                ← .env, __pycache__/, *.pyc 등 Git 제외 목록
+├── .env.example                ← API 키 입력 템플릿 (실제 키 없음)
+└── results/                    ← 실행 결과 저장 폴더 (자동 생성)
     ├── 2025-03-15_data.json / 2025-03-15_travel_plan.md
-    └── 2025-09-15_data.json / 2025-09-15_travel_plan.md
+    ├── 2025-09-15_data.json / 2025-09-15_travel_plan.md
+    └── 2025-10-01_data.json / 2025-10-01_travel_plan.md   ← 보너스 기능 검증용(복수 지역 2곳)
 ```
 
 ---
 
 ## 13. 전체 소스 코드 (travel_planner.py)
 
-기본 요구사항 완료 후 아래 15장의 두 보너스 과제(복수 지역 추천, 결과 캐싱)를 실제로 반영한 최종 버전이다. `--count`(추천받을 지역 수)와 `--refresh`(캐시 무시) 옵션이 추가되었다.
+기본 요구사항 완료 후 두 보너스 과제(복수 지역 추천, 결과 캐싱)를 실제로 반영한 최종 버전이다. `--count`(추천받을 지역 수)와 `--refresh`(캐시 무시) 옵션이 추가되었다. 전체 코드(약 457줄)를 그대로 수록한다.
 
 ```python
 """
@@ -797,8 +829,8 @@ python travel_planner.py --date "2025-10-01" --count 2 --refresh
 | 지도 API 실패해도 리포트 생성은 계속 진행 | ✅ |
 | 캐시 파일(`__pycache__`, `*.pyc`) 관리 및 유의사항 문서화 | ✅ |
 | 실제 오류 상황(키 미설정/인증 실패/검색 0건/옵션 오류) 재현 검증 | ✅ |
-| (보너스) 복수 지역 추천 — --count 옵션 | ✅ |
-| (보너스) 결과 캐싱 — 재실행/--refresh | ✅ |
+| (보너스) 복수 지역 추천 — `--count` 옵션 | ✅ |
+| (보너스) 결과 캐싱 — 재실행/`--refresh` | ✅ |
 
 ---
 
